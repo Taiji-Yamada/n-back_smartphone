@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>教室用 n-back</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 実験室の課題画面。ホーム＝水準カード＋結果表、課題中＝全画面の刺激提示。 */
+:root{
+  --bg:#eef1f4; --surface:#ffffff; --fg:#1b2430; --muted:#5d6876; --line:#d3d9e0;
+  --accent:#24508f; --accent-fg:#ffffff; --hit:#1f7a4d; --fa:#b0452c; --lure:#a8741a;
+  --stage:#ffffff; --stage-fg:#141a22;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12161c; --surface:#1a2029; --fg:#e4e9ef; --muted:#97a2b0; --line:#2c3440;
+  --accent:#7fa8e6; --accent-fg:#0d1420; --hit:#5cc493; --fa:#ec8a72; --lure:#e0b35c;
+  --stage:#0c0f13; --stage-fg:#eef2f6; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161c; --surface:#1a2029; --fg:#e4e9ef; --muted:#97a2b0; --line:#2c3440;
+  --accent:#7fa8e6; --accent-fg:#0d1420; --hit:#5cc493; --fa:#ec8a72; --lure:#e0b35c;
+  --stage:#0c0f13; --stage-fg:#eef2f6; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.65;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:760px;margin:0 auto;padding-block:20px 48px;display:flex;flex-direction:column;gap:22px}
+h1{font-size:1.5rem;margin:0;text-wrap:balance;letter-spacing:.02em}
+h2{font-size:1.05rem;margin:0 0 10px;text-wrap:balance}
+p{margin:0}
+.lede{color:var(--muted);max-width:62ch}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.levels{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:560px){.levels{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lv{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.lv .n{font-family:var(--f-mono);font-size:1.6rem;font-weight:500;line-height:1}
+.lv .rule{font-size:.85rem;color:var(--muted);flex:1}
+.lv .state{font-size:.75rem;color:var(--muted);letter-spacing:.04em}
+.lv .state.done{color:var(--hit)}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:8px 12px}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:700}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.opts{display:flex;flex-wrap:wrap;gap:14px;align-items:center;font-size:.9rem}
+.opts label{display:flex;gap:6px;align-items:center}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.tablebox{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:520px;font-size:.88rem}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-weight:500;color:var(--muted);font-size:.78rem;letter-spacing:.04em}
+td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bar{display:flex;align-items:center;gap:8px}
+.bar i{display:block;height:8px;border-radius:2px;min-width:1px}
+.bar .t{flex:0 0 70px;height:8px;background:var(--line);border-radius:2px;position:relative;overflow:hidden}
+.bar .t i{position:absolute;left:0;top:0;bottom:0}
+.empty{color:var(--muted);font-size:.9rem}
+.copyrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.copyrow code{font-family:var(--f-mono);font-size:.8rem;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;flex:1;min-width:0;overflow-wrap:anywhere;user-select:all}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.78rem;color:var(--muted);margin-top:8px}
+.legend span::before{content:"";display:inline-block;width:10px;height:8px;border-radius:2px;margin-right:5px;background:var(--c)}
+details{font-size:.88rem;color:var(--muted)}
+details summary{cursor:pointer;color:var(--fg);font-weight:500}
+details ul{margin:8px 0 0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px}
+
+/* 課題画面 */
+#stage{position:fixed;inset:0;background:var(--stage);color:var(--stage-fg);z-index:20;display:flex;flex-direction:column;
+  padding:calc(12px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.stage-top{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:.85rem;color:var(--muted)}
+.stage-top button{background:transparent;color:var(--muted);border-color:var(--line);padding:5px 10px;font-size:.8rem}
+.stage-mid{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;min-height:0;text-align:center}
+#stim{font-size:min(34vw,180px);line-height:1;font-weight:500;min-height:1.1em;display:flex;align-items:center;justify-content:center;user-select:none}
+#stim.fix{font-family:var(--f-mono);font-size:min(12vw,56px);color:var(--muted)}
+#fb{min-height:1.6em;font-weight:700;font-size:1rem}
+#fb.ok{color:var(--hit)} #fb.ng{color:var(--fa)}
+.instr{max-width:34ch;display:flex;flex-direction:column;gap:12px;align-items:center}
+.instr .big{font-size:1.25rem;font-weight:700}
+.example{font-family:var(--f-body);font-size:1.3rem;letter-spacing:.35em;color:var(--muted)}
+.example b{color:var(--accent)}
+#press{width:100%;max-width:520px;margin:0 auto;display:block;padding:26px 0;font-size:1.3rem;font-weight:700;border-radius:14px;
+  background:var(--accent);color:var(--accent-fg);border:none;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+#press:active{filter:brightness(.9)}
+#press[disabled]{opacity:.35}
+.hint{font-size:.75rem;color:var(--muted);text-align:center;margin-top:6px}
+.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 22px;text-align:left;font-size:.95rem}
+.summary dt{color:var(--muted);font-size:.8rem}
+.summary dd{margin:0;font-family:var(--f-mono);font-size:1.2rem}
+@media (prefers-reduced-motion:no-preference){#fb{transition:opacity .15s}}
+</style>
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+
+<div class="wrap" id="home">
+  <header style="display:flex;flex-direction:column;gap:8px">
+    <h1>教室用 n-back</h1>
+    <p class="lede">画面中央に文字が1つずつ出ます。ルールに合う文字が出たときだけボタンを押してください。0-back から順に進めます。1ブロック約1分半です。</p>
+  </header>
+
+  <section>
+    <div class="levels" id="levels"></div>
+    <div class="opts" style="margin-top:12px">
+      <label><input type="checkbox" id="practice"> 練習モード（12試行・正誤を表示・記録しない）</label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>あなたの結果</h2>
+    <div id="results"><p class="empty">まだ結果はありません。0-back から始めてください。</p></div>
+  </section>
+
+  <details>
+    <summary>課題の仕様（教員向け）</summary>
+    <ul>
+      <li>刺激：かな8文字（あ か さ た な は ま や）。提示 500 ms ＋ 空白 2000 ms ＝ 1試行 2.5 秒。反応は試行内の最初の1回を記録。</li>
+      <li>1ブロック：最初の n 試行（採点外）＋採点対象 30 試行。ターゲット 9（30%）。2・3-back ではルア 4 を目標に配置（1-back は構造上平均 2〜3）。</li>
+      <li>ルア：n±1 個前と一致し、n 個前とは一致しない試行（1-back では 2 個前一致）。配置は乱数で、実際の種別は生成後に判定。</li>
+      <li>0-back：ブロック開始時に示す1文字がターゲット（注意のみの統制条件）。</li>
+      <li>d′ はルアと非ルアを合わせた「非ターゲット」を雑音として計算。補正は log-linear（(x+0.5)/(N+1)）。</li>
+      <li>記録はこの端末のブラウザ内だけに残ります。クラス集計には下の「結果を1行でコピー」を回収してください。</li>
+    </ul>
+  </details>
+</div>
+
+<div id="stage" hidden>
+  <div class="stage-top"><span id="stageLabel" class="mono"></span><span id="progress" class="mono"></span><button id="abort" type="button">中止</button></div>
+  <div class="stage-mid" id="mid"></div>
+  <div>
+    <button id="press" type="button" disabled>一致</button>
+    <p class="hint">パソコンではスペースキーでも押せます</p>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+const KANA=["あ","か","さ","た","な","は","ま","や"];
+const P={stim:500,isi:2000,nScored:30,nPractice:12,targetRate:0.3,lures:4};
+const RULES={0:"最初に示す文字が出たら押す",1:"直前と同じ文字なら押す",2:"2つ前と同じ文字なら押す",3:"3つ前と同じ文字なら押す"};
+const EXAMPLES={1:"か <b>か</b> さ",2:"た か <b>た</b>",3:"な は ま <b>な</b>"};
+const $=id=>document.getElementById(id);
+let results={};
+try{const r=localStorage.getItem("nback-results");if(r)results=JSON.parse(r)||{};}catch(e){results={};}
+function save(){try{localStorage.setItem("nback-results",JSON.stringify(results));}catch(e){}}
+
+const rnd=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+function genBlock(n,practice){
+  const N=practice?P.nPractice:P.nScored;
+  const nT=Math.round(N*P.targetRate);
+  const nL=n===0?0:(practice?1:P.lures);
+  const plan=shuffle([...Array(nT).fill("T"),...Array(nL).fill("L"),...Array(N-nT-nL).fill("F")]);
+  const seq=[];let target=null;
+  if(n===0){
+    target=rnd(KANA);const others=KANA.filter(k=>k!==target);
+    plan.forEach(t=>seq.push(t==="T"?target:rnd(others)));
+  }else{
+    for(let i=0;i<n;i++){const ex=new Set();if(i>0)ex.add(seq[i-1]);seq.push(rnd(KANA.filter(k=>!ex.has(k))));}
+    for(let j=0;j<N;j++){
+      const i=n+j,t=plan[j],back=seq[i-n];
+      if(t==="T"){seq.push(back);continue;}
+      if(t==="L"){
+        const c=[];if(i-n-1>=0)c.push(seq[i-n-1]);if(n>=2)c.push(seq[i-n+1]);
+        const ok=c.filter(x=>x!==back);if(ok.length){seq.push(rnd(ok));continue;}
+      }
+      const ex=new Set([back,seq[i-1]]);if(i-n-1>=0)ex.add(seq[i-n-1]);if(n>=2)ex.add(seq[i-n+1]);
+      seq.push(rnd(KANA.filter(k=>!ex.has(k))));
+    }
+  }
+  const types=seq.map((s,i)=>{
+    if(n===0)return s===target?"T":"F";
+    if(i<n)return "pre";
+    if(s===seq[i-n])return "T";
+    if((i-n-1>=0&&s===seq[i-n-1])||(n>=2&&s===seq[i-n+1]))return "L";
+    return "F";
+  });
+  return {n,practice,seq,types,target};
+}
+
+// 逆正規分布（Acklam の近似）
+function invNorm(p){
+  const a=[-39.69683028665376,220.9460984245205,-275.9285104469687,138.357751867269,-30.66479806614716,2.506628277459239],
+  b=[-54.47609879822406,161.5858368580409,-155.6989798598866,66.80131188771972,-13.28068155288572],
+  c=[-0.007784894002430293,-0.3223964580411365,-2.400758277161838,-2.549732539343734,4.374664141464968,2.938163982698783],
+  d=[0.007784695709041462,0.3224671290700398,2.445134137142996,3.754408661907416],pl=0.02425;
+  let q,r;
+  if(p<pl){q=Math.sqrt(-2*Math.log(p));return(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+  if(p>1-pl){q=Math.sqrt(-2*Math.log(1-p));return-(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+  q=p-0.5;r=q*q;return(((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+}
+
+function score(block,resp){
+  const s={nT:0,hit:0,nF:0,fa:0,nL:0,lfa:0,rts:[]};
+  block.types.forEach((t,i)=>{
+    const r=resp[i];
+    if(t==="T"){s.nT++;if(r!=null){s.hit++;s.rts.push(r);}}
+    else if(t==="F"){s.nF++;if(r!=null)s.fa++;}
+    else if(t==="L"){s.nL++;if(r!=null)s.lfa++;}
+  });
+  const noise=s.nF+s.nL,faAll=s.fa+s.lfa;
+  const H=(s.hit+0.5)/(s.nT+1),F=(faAll+0.5)/(noise+1);
+  s.dprime=invNorm(H)-invNorm(F);
+  s.rt=s.rts.length?Math.round(s.rts.reduce((x,y)=>x+y,0)/s.rts.length):null;
+  delete s.rts;return s;
+}
+
+/* ---------- ホーム描画 ---------- */
+function renderLevels(){
+  $("levels").innerHTML="";
+  [0,1,2,3].forEach(n=>{
+    const d=document.createElement("div");d.className="lv";
+    const done=!!results[n];
+    d.innerHTML=`<div class="n">${n}-back</div><div class="rule"></div><div class="state ${done?"done":""}">${done?"記録あり":"未実施"}</div>`;
+    d.querySelector(".rule").textContent=RULES[n];
+    const b=document.createElement("button");b.type="button";b.id="start"+n;
+    b.className=(!done&&(n===0||results[n-1]))?"primary":"";b.textContent=done?"もう一度":"始める";
+    b.addEventListener("click",()=>openInstr(n));d.appendChild(b);$("levels").appendChild(d);
+  });
+}
+const pct=(a,b)=>b?a/b:0;
+function bar(v,col){return `<div class="bar"><span class="t"><i style="width:${(v*100).toFixed(1)}%;background:var(${col})"></i></span><span class="mono">${Math.round(v*100)}%</span></div>`;}
+function renderResults(){
+  const ns=[0,1,2,3].filter(n=>results[n]);
+  if(!ns.length){$("results").innerHTML='<p class="empty">まだ結果はありません。0-back から始めてください。</p>';return;}
+  let rows=ns.map(n=>{const s=results[n];
+    return `<tr><td class="num">${n}-back</td><td>${bar(pct(s.hit,s.nT),"--hit")}</td><td>${bar(pct(s.fa,s.nF),"--fa")}</td><td>${s.nL?bar(pct(s.lfa,s.nL),"--lure"):'<span class="mono" style="color:var(--muted)">—</span>'}</td><td class="num">${s.dprime.toFixed(2)}</td><td class="num">${s.rt!=null?s.rt+" ms":"—"}</td></tr>`;}).join("");
+  const line=ns.map(n=>{const s=results[n];return `${n}B H${s.hit}/${s.nT} FA${s.fa}/${s.nF}`+(s.nL?` L${s.lfa}/${s.nL}`:"")+` d'${s.dprime.toFixed(2)}`;}).join(" | ");
+  $("results").innerHTML=`<div class="tablebox"><table><thead><tr><th>水準</th><th>ヒット率</th><th>誤反応率（通常）</th><th>誤反応率（ルア）</th><th>d′</th><th>平均RT</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="legend"><span style="--c:var(--hit)">押すべき文字で押せた割合</span><span style="--c:var(--fa)">関係ない文字で押した割合</span><span style="--c:var(--lure)">「1つずれた一致」で押した割合</span></div>
+  <div class="copyrow"><code id="line"></code><button type="button" id="copy">結果を1行でコピー</button><button type="button" id="reset">記録を消す</button></div>
+  <p id="resetConfirm" class="empty" hidden style="margin-top:8px">本当に消しますか？ <button type="button" id="resetYes">消す</button> <button type="button" id="resetNo">やめる</button></p>`;
+  $("line").textContent=line;
+  $("copy").addEventListener("click",()=>{
+    const b=$("copy");
+    navigator.clipboard.writeText(line).then(()=>{b.textContent="コピーしました";setTimeout(()=>b.textContent="結果を1行でコピー",1600);})
+      .catch(()=>{const r=document.createRange();r.selectNodeContents($("line"));const sel=getSelection();sel.removeAllRanges();sel.addRange(r);b.textContent="選択しました。長押しでコピー";});
+  });
+  $("reset").addEventListener("click",()=>{$("resetConfirm").hidden=false;});
+  $("resetNo").addEventListener("click",()=>{$("resetConfirm").hidden=true;});
+  $("resetYes").addEventListener("click",()=>{results={};save();renderLevels();renderResults();});
+}
+
+/* ---------- 課題 ---------- */
+let run=null,wake=null;
+const mid=$("mid"),press=$("press");
+function showStage(label){$("stage").hidden=false;$("stageLabel").textContent=label;$("progress").textContent="";document.body.style.overflow="hidden";}
+function hideStage(){$("stage").hidden=true;document.body.style.overflow="";press.disabled=true;
+  if(wake){wake.release().catch(()=>{});wake=null;}}
+
+function openInstr(n){
+  const practice=$("practice").checked;
+  const block=genBlock(n,practice);
+  showStage(`${n}-back${practice?"（練習）":""}`);
+  mid.innerHTML="";
+  const box=document.createElement("div");box.className="instr";
+  const big=document.createElement("div");big.className="big";
+  big.textContent=n===0?`「${block.target}」が出たら押す`:RULES[n];
+  box.appendChild(big);
+  if(n>0){const ex=document.createElement("div");ex.className="example";ex.innerHTML=EXAMPLES[n]+" ← 押す";box.appendChild(ex);}
+  const note=document.createElement("p");note.style.color="var(--muted)";note.style.fontSize=".85rem";
+  note.textContent=`${block.seq.length} 文字、約 ${Math.round(block.seq.length*(P.stim+P.isi)/1000)} 秒。迷ったら押さないでください。`;
+  box.appendChild(note);
+  const go=document.createElement("button");go.type="button";go.className="primary";go.textContent="スタート";go.style.padding="12px 28px";
+  go.addEventListener("click",()=>startBlock(block));box.appendChild(go);
+  mid.appendChild(box);go.focus();
+}
+
+function startBlock(block){
+  try{navigator.wakeLock&&navigator.wakeLock.request("screen").then(w=>wake=w).catch(()=>{});}catch(e){}
+  mid.innerHTML='<div id="stim" class="fix">+</div><div id="fb"></div>';
+  run={block,i:-1,resp:new Array(block.seq.length).fill(null),t0:0,timer:null};
+  press.disabled=false;
+  run.timer=setTimeout(nextTrial,900);
+}
+function nextTrial(){
+  if(!run)return;
+  const prev=run.i;
+  if(run.block.practice&&prev>=0)feedback(prev);
+  run.i++;
+  const {block}=run,i=run.i;
+  if(i>=block.seq.length){finish();return;}
+  $("progress").textContent=`${i+1} / ${block.seq.length}`;
+  const st=$("stim");st.className="";st.textContent=block.seq[i];
+  run.t0=performance.now();
+  run.timer=setTimeout(()=>{if(!run)return;st.className="fix";st.textContent="+";
+    run.timer=setTimeout(nextTrial,P.isi);},P.stim);
+}
+function feedback(i){
+  const t=run.block.types[i],r=run.resp[i],fb=$("fb");if(!fb)return;
+  if(t==="pre"){fb.textContent="";fb.className="";return;}
+  if(t==="T"){fb.textContent=r!=null?"○ 正しく押せました":"× 見逃し";fb.className=r!=null?"ok":"ng";}
+  else if(r!=null){fb.textContent=t==="L"?"× 1つずれた一致でした":"× 押さなくてよい文字";fb.className="ng";}
+  else{fb.textContent="";fb.className="";}
+}
+function respond(){
+  if(!run||run.i<0||run.i>=run.block.seq.length)return;
+  if(run.resp[run.i]!=null)return;
+  run.resp[run.i]=Math.round(performance.now()-run.t0);
+  press.animate&&press.animate([{transform:"scale(.97)"},{transform:"scale(1)"}],{duration:120});
+}
+press.addEventListener("pointerdown",e=>{e.preventDefault();respond();});
+press.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();respond();}});
+document.addEventListener("keydown",e=>{if(e.code==="Space"&&!$("stage").hidden){e.preventDefault();respond();}});
+$("abort").addEventListener("click",()=>{if(run){clearTimeout(run.timer);run=null;}hideStage();});
+
+function finish(){
+  const {block,resp}=run;run=null;press.disabled=true;
+  const s=score(block,resp);
+  if(!block.practice){results[block.n]=s;save();}
+  mid.innerHTML="";
+  const box=document.createElement("div");box.className="instr";
+  box.innerHTML=`<div class="big">${block.n}-back ${block.practice?"練習 ":""}終了</div>
+  <dl class="summary"><div><dt>ヒット</dt><dd>${s.hit} / ${s.nT}</dd></div><div><dt>誤反応（通常）</dt><dd>${s.fa} / ${s.nF}</dd></div>
+  ${s.nL?`<div><dt>誤反応（ルア）</dt><dd>${s.lfa} / ${s.nL}</dd></div>`:""}<div><dt>d′</dt><dd>${s.dprime.toFixed(2)}</dd></div></dl>`;
+  const row=document.createElement("div");row.style.display="flex";row.style.gap="10px";row.style.flexWrap="wrap";row.style.justifyContent="center";
+  if(!block.practice&&block.n<3){const nx=document.createElement("button");nx.type="button";nx.className="primary";nx.textContent=`次へ（${block.n+1}-back）`;
+    nx.addEventListener("click",()=>openInstr(block.n+1));row.appendChild(nx);}
+  const bk=document.createElement("button");bk.type="button";bk.textContent="結果一覧に戻る";
+  bk.addEventListener("click",()=>{hideStage();renderLevels();renderResults();});row.appendChild(bk);
+  box.appendChild(row);mid.appendChild(box);
+  renderLevels();renderResults();
+}
+
+renderLevels();renderResults();
+})();
+</script>
+
+</body>
+</html>
